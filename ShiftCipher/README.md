@@ -71,7 +71,7 @@ programs is more apparent.
 	<li>punctuation</li>
 	</ul>
 </li>
-<li>By <b><i>default</i></b>, neither numbers nor punctuation are **NOT** included in the shift cipher. <br>A flag can be used to encipher the both of them also.</li>
+<li>By <b><i>default</i></b>, both numbers and punctuation are **NOT** included in the shift cipher. <br>A flag can be used to encipher the both of them also.</li>
 </ol>
 
 

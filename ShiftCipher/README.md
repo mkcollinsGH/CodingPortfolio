@@ -18,7 +18,7 @@ There are no expected users for this code/software, but installation
 instructions are included below for reference and ease.
 
 <h2 id="install">Installation</h2>
-To compile the two executables, a C++ compiler with standard C++17 capability
+To compile the two executables, a C++ compiler with standard C++20 capability
 required. All included libraries and headers are from the standard library.
 A Linux environment is expected with a version of 'make' installed as well.
 The <b>Makefile</b> does the compilation for the two executables (source code 

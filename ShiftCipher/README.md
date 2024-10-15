@@ -22,7 +22,7 @@ To compile the two executables, a C++ compiler with standard C++20 capability
 required. All included libraries and headers are from the standard library.
 A Linux environment is expected with a version of 'make' installed as well.
 The <b>Makefile</b> does the compilation for the two executables (source code 
-for each is located within the <b>source</b> directory).
+for each is located within the <b>src</b> directory).
 
 <h2 id="quick-backgnd">Quick Background<h2>
 <h3>Reference: <a href="https://www.cryptography-textbook.com/">Understanding Cryptography</a></h3>

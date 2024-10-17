@@ -5,9 +5,15 @@
  *
  * Brief:
  * Demonstration code to perform the deciphering/decoding of a [circular] shift cipher.
- * The input is expected to be UUTF-8 enciphered text, but strictly in the English/ASCII
+ * The input is expected to be UTF-8 enciphered text, but strictly in the English/ASCII
  * code space (alphabet, punctuation, digits in the lower 256 codes). 
  */
+
+/*
+//----------//
+// INCLUDES //
+//----------//
+*/ 
 
 #include <ios>             // contains iostream formatting flags
 #include <iostream>
@@ -20,10 +26,9 @@
 #include <valarray>        // for circular-shift functionality
 #include <vector>
 #include <map>             // act as a dictionary
-#include <set>
+#include <deque>           // double-ended queue (popping front and back)
 #include <bitset>          // efficient storage of true/false values
-//#include <unordered_map>
-//#include <print>           // formatted file-stream or character-stream printing, requires C++23 
+
 
 /*
 //---------//
@@ -37,13 +42,13 @@ namespace fsys = std::filesystem;
 // Convenience namespace for ""s string literals and time shorthand notations
 using namespace std::literals;
 
-// standard input (keyboard), output (terminal), error (terminal)
+// Standard input (keyboard), output (terminal), error (terminal)
 using std::cout;
 using std::cin;
 using std::cerr;
 using std::endl;
 
-// standard file stream types (input & output respectively)
+// Standard file stream types (input & output respectively)
 using std::ifstream;
 using std::ofstream;
 
@@ -60,10 +65,11 @@ using std::string_view;
 
 // Containers for strings, characters 
 typedef std::vector<std::string> StrVec;
+typedef std::deque<std::string> StrDeq;
+
 typedef std::valarray<char> ChrVarr;
 
 typedef std::map<char,char> ChrDict;
-typedef std::set<char> ChrSet;
 
 
 /*
@@ -102,7 +108,6 @@ struct DecipherCtrlOpts
 	// Input & output filenames
 	string infilename;
 	string outfilename;
-	bool use_default_oname = true;  // an extension (.dec) will be appended to infilename
 	
 	// Shift amount entered by user on command-line.
 	//   Default cipher shift amount is 5 characters.
@@ -116,9 +121,6 @@ struct DecipherCtrlOpts
 	int digits_shift_len  = 0;
 	int puncts_shift_len  = 0;
 
-	bool dec_numbers = false;  // decipher numbers from input file
-	bool dec_puncts  = false;  // decipher punctation from input file
-
 	// Dictionary (C++ map) to decipher alphabet, numbers and punctuation	
 	ChrDict cipher_dict;
 
@@ -126,15 +128,17 @@ struct DecipherCtrlOpts
 	//   the output file)
 	size_t nbytes_file = 0;
 
-	// Flag to show information as the program is running for testing purposes
-	bool display_log_info = false;
 
 	// Flag storage as efficient as possible
 	std::bitset<8> decipher_flags = 0b01000000;
 
-	//decipher_flags[1] = true;  // default output name to be used
+	//decipher_flags[0] = false; // HELP or USAGE was needed or requested
+	//decipher_flags[1] = true;  // default output name to be used (.dec extension appended by default)
 	//decipher_flags[2] = false; // digits to be deciphered in input file
 	//decipher_flags[3] = false; // punctuation symbols to be deciphered in input file 
+	//decipher_flags[4] = false; // UNUSED FLAG
+	//decipher_flags[5] = false; // UNUSED FLAG
+	//decipher_flags[6] = false; // UNUSED FLAG
 	//decipher_flags[7] = false; // display logging info for testing purposes
 };
 
@@ -162,12 +166,12 @@ const ChrVarr ORIG_LOWERCASE = {
 	'u','v','w','x','y','z'
 };
 
-// numbers as characters 
+// numberical digits as characters 
 const ChrVarr ORIG_DIGITS = {
 	'0','1','2','3','4','5','6','7','8','9'
 };
 
-// most punctuation as individual characters 
+// most punctuation symbols as individual characters 
 //   placed in ASCII/UTF-8 order
 const ChrVarr ORIG_PUNCTUATION_SYMBOLS = {
 	'!', '"', '#', '$', '%', '&',
@@ -194,13 +198,12 @@ void printHelp(string_view progname) noexcept;
 
 // Functions to parse command-line or user-interface arguments/options
 DECIPHER_PROG_CODES parseSingleCharOptions(string_view cmdlnSingles, DecipherCtrlOpts* ciphopts) noexcept;
-int parseCommandLine(const StrVec& usrCmdln, DecipherCtrlOpts* ciphopts);
-//DECIPHER_PROG_CODES parseCommandLine(const StrVec& usrCmdln, DecipherCtrlOpts* ciphopts);
+DECIPHER_PROG_CODES parseCommandLine(const StrVec& usrCmdln, DecipherCtrlOpts* ciphopts);
 
-// create full deciphering dictionary (including alphabet, punctuation, numbers
+// Create full deciphering dictionary (including alphabet, punctuation, digits
 void generateCipherDict(DecipherCtrlOpts* ciphopts) noexcept;
 
-// read input file, decipher and write output file
+// Read input file, decipher and write output file
 void decipherFileText(DecipherCtrlOpts* ciphopts);
 
 // Print log-like information to terminal screen
@@ -212,63 +215,74 @@ void printLogInfo(DecipherCtrlOpts* ciphopts) noexcept;
 // MAIN (DRIVER) //
 //---------------//
 */
-int main(int nargs, char* args[]) {
-	// create storage for raw command-line and converted options/arguments
+int main(int nargs, char* args[]) 
+{
+	// Program exit status (but prepend MY_ because EXIT_STATUS may exist already)
+	int MY_EXIT_STATUS = 0;
+
+	// Create storage for raw command-line and converted options/arguments
 	StrVec raw_cmdln;
 	DecipherCtrlOpts cmdopts;
 
-	// convert command-line entries to C++ strings and store in vector
+	// Convert command-line entries to C++ strings and store in vector
 	for(int n = 0; n < nargs; ++n) {
-		raw_cmdln.push_back(string(args[n]));
+		raw_cmdln.emplace_back(args[n]);
 	}
 
+	// Start parsing the command-line and determine if deciphering text will proceed
 	try
 	{
-		// can throw an std::invalid_argument exception
-		int parse_res = parseCommandLine(raw_cmdln, &cmdopts);
-		//DECIPHER_PROG_CODES parse_res = parseCommandLine(raw_cmdln, &cmdopts);
+		DECIPHER_PROG_CODES parse_res = parseCommandLine(raw_cmdln, &cmdopts);
 
-		if( parse_res == 1 ) {
-			// user either needed USAGE or HELP printed
-			/*if( cmdopts.decipher_flags[7] == true ) {
-			 * cerr << endl << DECIPHER_PROG_MSG[parse_res] << endl;
-			  }
-			 */
-			return(0);
-		}
-		else if( parse_res == 0 ) {
-			generateCipherDict(&cmdopts);
+		switch( parse_res ) {
+			case CMDLN_HELP_REQ:
+				printHelp(cmdopts.prog_name_stripped);
+				MY_EXIT_STATUS = 0;
+				break;
+			case CMDLN_USAGE_REQ:
+				printUsage(cmdopts.prog_name_stripped);
+				MY_EXIT_STATUS = 0;
+				break;
+			case CMDLN_USER_ERROR:
+				// This will not be reached because exception thrown by parseCommandLine()
+				//   if this code occurs
+				MY_EXIT_STATUS = 1;
+				break;
+			case CMDLN_OK:
+				generateCipherDict(&cmdopts);
 
-			// can throw a filesystem_error exception
-			decipherFileText(&cmdopts);
+				decipherFileText(&cmdopts);
 
-			// print log-like info
-			if( cmdopts.display_log_info ) {
-				printLogInfo(&cmdopts);
-			}
-		}// end if-elseif(parse_res)
+				if( cmdopts.decipher_flags[7] == true ) {
+					printLogInfo(&cmdopts);
+				}
+				
+				MY_EXIT_STATUS = 0;
+				break;
+		}// end switch()
 	}
 	catch( const std::invalid_argument& e) {
 		cerr << e.what() << endl;
-		return(1);
+		MY_EXIT_STATUS = 1;
 	}
 	catch( const std::out_of_range& e ) {
 		cerr << e.what() << endl;
-		return(1);
+		MY_EXIT_STATUS = 1;
 	}
 	catch( const fsys::filesystem_error& e ) {
 		cerr << e.what() << endl;
-		return(1);
+		MY_EXIT_STATUS = 1;
 	}
 	catch( ... ) {
 		// general catch-all error-handling
 		cerr << "Unexpected error encountered. Program terminated." << endl;
-		return(1);
+		MY_EXIT_STATUS = 1;
 	}
 
-	// exit successfully
-	return(0);
+	// Exit program
+	return(MY_EXIT_STATUS);
 }
+
 
 /*
 //----------------------//
@@ -276,8 +290,10 @@ int main(int nargs, char* args[]) {
 //----------------------//
 */
 
-/* 
- *   Description: 
+/*
+ * calcReducedShift
+ *
+ * Description: 
  *   Calculates a reduced shift amount based on whether
  *   the entered shift amount is negative or positive to protect against
  *   unnecessary shifting if the requested shift amount is greater than the
@@ -285,18 +301,18 @@ int main(int nargs, char* args[]) {
  *   Defaults to the size of the English alphabet (26).
  *
  *   Note:
- *   If this were not a privately-scoped function (meaning it is not defined or 
- *   declared in a header), then mod_size would need to be checked for 0
- *   or less than 0. 
- *   But, in this case, only access to the source code could be used to cause 
- *   undefined or error-causing behavior.
+ *    If this were not a privately-scoped function (meaning it is not defined or 
+ *    declared in a header), then mod_size would need to be checked for 0
+ *    or less than 0. 
+ *    But, in this case, only access to the source code could be used to cause 
+ *    undefined or error-causing behavior.
  *
- *   Input:
- *   original_shift -> shift amount entered by user (remains unchanged by program)
- *   mod_size       -> size of the "alphabet" (to be used on different sized sets of characters)
+ * Input:
+ *  original_shift -> shift amount entered by user (remains unchanged by program)
+ *  mod_size       -> size of the "alphabet" (to be used on different sized sets of characters)
  *
- *   Output:
- *   Integer reduced modulo-N (mod_size)
+ * Output:
+ *  Integer reduced modulo-N (mod_size)
  */
 int calcReducedShift(const int& original_shift, const int& mod_size) 
 {
@@ -314,15 +330,18 @@ int calcReducedShift(const int& original_shift, const int& mod_size)
 	return(reduced_shift);
 }
 
+
 /*
+ * printUsage
+ *
  * Description:
  * Prints a simple usage without a full listing of options and their descriptions.
  *
  * Input:
- * progname -> name of the program
+ * progname -> name of the program (read-only)
  *
  * Output:
- * None (prints to terminal screen --> std::cout)
+ * None (Disallowed)
  */
 void printUsage(string_view progname) noexcept
 {
@@ -338,57 +357,68 @@ void printUsage(string_view progname) noexcept
 	return;
 }
 
+
 /*
+ * printHelp
+ *
  * Description:
  * Prints the full HELP message with option descriptions, etc.
  *
  * Input:
- * progname -> name of the program
+ * progname -> name of the program (read-only)
  *
  * Output:
- * None (prints to terminal screen --> std::cout)
+ * None (Disallowed)
  */
 void printHelp(string_view progname) noexcept
 {
+	string help_spacer;
+	help_spacer.assign(27, ' ');
+
 	cout << endl;
-	cout << "Usage:" << endl;
-	cout << progname << " [options]";
-	cout << " -i <IFILE> [-o <OFILE>]" << endl;
+	cout << "\e[1mUsage\e[0m:"s << endl;
+	cout << progname << " [options] -i <IFILE> [-o <OFILE>]"s << endl;
 	cout << endl;
-	cout << "Required:" << endl;
-	cout << "  -i, --ifile <IFILE>   ";
-	cout << " \tName of input file to read (must be UTF-8/ASCII text)" << endl;
+	cout << "\e[1mRequired\e[0m:"s << endl;
+	cout << "  -i <IFILE>,"s << endl;
+    cout << "  --ifile <IFILE>   "s;
+	cout << "Name of input file to read (must be UTF-8/ASCII text)"s << endl;
 	cout << endl;
-	cout << "Options:" << endl;
-	cout << "  -o, --ofile <OFILE>   ";
-	cout << " \tName of output file to write (will be overwritten if exists)" << endl;
-	cout << "                        ";
-	cout << " \tDefault filename created by appending \".dec\" to IFILE if option not used" << endl;
+	cout << "\e[1mOptions\e[0m:"s << endl;
+	cout << "  -o <OFILE>,"s << endl;
+    cout << "  --ofile <OFILE>          "s;
+	cout << "Name of output file to write (will be overwritten if exists)"s << endl;
+	cout << help_spacer;
+	cout << "Default filename created by appending \".dec\" to IFILE if option not used"s << endl;
 	cout << endl;
-	cout << "  -s <SHIFT>," << endl;
-	cout << "  --shift-amount <SHIFT>";
-	cout << " \tNumber of characters alphabet was shifted during enciphering (default: 5)" << endl;
+	cout << "  -s <SHIFT>,"s << endl;
+	cout << "  --shift-amount <SHIFT>   "s;
+	cout << "Number of characters that each alphabet was shifted during enciphering (\e[1;3mDefault\e[0m: 5)"s << endl;
+	cout << help_spacer;
+	cout << "\e[1mNote\e[0m: Positive and Negative Integers are allowed."s << endl;
 	cout << endl;
-	cout << "  -n, --shift-nums      ";
-	cout << " \tInclude numbers in shifted/deciphered alphabet (default: false)" << endl;
-	cout << "  -p, --shift-puncts    ";
-	cout << " \tInclude punctuation in shifted/deciphered alphabet (default: false)" << endl;
-	cout << "  -a, --shift-all       ";
-	cout << " \tInclude both numbers and punctuation in shifted dictionary (default: false)" << endl;
+	cout << "  -n, --shift-numbers      "s;
+	cout << "Include numberical digits in shifted/deciphered alphabet (\e[1;3mDefault\e[0m: FALSE)"s << endl;
+	cout << "  -p, --shift-puncts       "s;
+	cout << "Include punctuation symbols in shifted/deciphered alphabet (\e[1;3mDefault\e[0m: FALSE)"s << endl;
+	cout << "  -a, --shift-all          "s;
+	cout << "Include both numbers and punctuation symbols in shifted dictionary (\e[1;3mDefault\e[0m: FALSE)"s << endl;
 	cout << endl;
-	cout << "  -h, --help            ";
-	cout << " \tPrint HELP message and stop without processing" << endl;
+	cout << "  -h, --help               "s;
+	cout << "Print \e[1;4mHELP\e[0m message and stop without processing"s << endl;
 	cout << endl;
-	cout << "Example uses:" << endl;
-	cout << "\t" << progname << " -a -i hello.txt" << endl;
-	cout << "\t" << progname << " -np -s 15 -i what.txt.enc -o this.dec" << endl;
-	cout << "\t" << progname << " --ofile temp.txt --ifile perm.enciph -pn -s -80" << endl;
+	cout << "\e[1mExamples\e[0m:"s << endl;
+	cout << "\t" << progname << " -a -i hello.txt"s << endl;
+	cout << "\t" << progname << " -np -s 15 -i what.txt.enc -o this.dec"s << endl;
+	cout << "\t" << progname << " --ofile temp.txt --ifile perm.enciph -pn -s -80"s << endl;
 	cout << endl;
 	return;
 }
 
 
 /*
+ * parseSingleCharOptions
+ *
  * Description:
  * Parses user-entered collected single-character argument/options/flags.
  *   This only applies to options/flags that do not have a follow-on value
@@ -400,26 +430,62 @@ void printHelp(string_view progname) noexcept
  *           as a standalone option/flag/argument
  *
  * Input:
- * cmdlnSingles -> user-entered, single-character argument
+ * cmdlnSingles -> user-entered, single-character argument (read-only)
  * ciphopts     -> decipher program controller
  *
  * Output:
  * DECIPHER_PROG_CODES (enum) -> Way to indicate success, failure or help wanted/needed
  *
  * Exception(s):
- * none -> Disallowed
+ * None -> Disallowed
  */
 DECIPHER_PROG_CODES parseSingleCharOptions(string_view cmdlnSingles, DecipherCtrlOpts* ciphopts) noexcept
 {
 	DECIPHER_PROG_CODES parse_results = CMDLN_OK;
 
-	if( cmdlnSingles.find_last_of("-"s) > 0 ) {
+	// If "--" is used or "-" is anywhere other than first position, 
+	//   an invalid argument was entered
+	if( cmdlnSingles.find_last_of('-') > 0 ) {
 		parse_results = CMDLN_USER_ERROR;
 	}
 
+	// Begin checking each character in the combined singles argument string
 	if( parse_results == CMDLN_OK ) {
-		string_view::const_iterator arg_char_pos = cmdlnSingles.begin();
+		string_view::iterator arg_char_pos = cmdlnSingles.begin();
 		std::advance(arg_char_pos, 1);
+
+		while( arg_char_pos != cmdlnSingles.end() ) {
+			switch( *arg_char_pos ) {
+				case 'a':
+					ciphopts->decipher_flags[2] = true;
+					ciphopts->decipher_flags[3] = true;
+					break;
+				case 'n':
+					ciphopts->decipher_flags[2] = true;
+					break;
+				case 'p':
+					ciphopts->decipher_flags[3] = true;
+					break;
+				case 'l':
+					ciphopts->decipher_flags[7] = true;
+					break;
+				case 'h':
+					ciphopts->decipher_flags[0] = true;
+
+					parse_results = CMDLN_HELP_REQ;
+					break;
+				default:
+					ciphopts->decipher_flags[2] = false;
+					ciphopts->decipher_flags[3] = false;
+					ciphopts->decipher_flags[7] = false;
+					ciphopts->decipher_flags[0] = false;
+					
+					parse_results = CMDLN_USER_ERROR;
+					break;
+			}
+
+			std::advance(arg_char_pos, 1);
+		}// end while(arg_char_pos)
 	}
 
 	return(parse_results);
@@ -427,6 +493,8 @@ DECIPHER_PROG_CODES parseSingleCharOptions(string_view cmdlnSingles, DecipherCtr
 
 
 /*
+ * parseCommandLine
+ *
  * Description:
  * Parses user-entered command-line for proper options or HELP. 
  *  Handles stripping of program name to name-only instead of full path.
@@ -436,7 +504,7 @@ DECIPHER_PROG_CODES parseSingleCharOptions(string_view cmdlnSingles, DecipherCtr
  * ciphopts  -> pointer to object to hold results of parsed/evaluated options
  *
  * Output:
- * parse_results -> Integer to indicate successful parsing/evaluation or HELP message requested
+ * DECIPHER_PROG_CODES (enum) -> Program codes to indicate command-line parsing successful or failed
  *
  * Exception:
  * std::invalid_argument -> conversion of intergers incorrect (bad input like 'A')
@@ -444,55 +512,57 @@ DECIPHER_PROG_CODES parseSingleCharOptions(string_view cmdlnSingles, DecipherCtr
  *
  * std::out_of_range -> conversion of intergers incorrect (too large for signed integer)
  */
-int parseCommandLine(const StrVec& usr_cmdln, DecipherCtrlOpts* ciphopts)
+DECIPHER_PROG_CODES parseCommandLine(const StrVec& usr_cmdln, DecipherCtrlOpts* ciphopts)
 {
-	// 0: command-line parsed successfully, continue program as intended
-	// 1: help printed to screen, stop program without failure status/code
-	int parse_results = 0;
+	DECIPHER_PROG_CODES parse_results = CMDLN_OK;
 
 	// Start at beginning of command-line, grab program name and go from there
-	size_t opt_number = 0;
-	string curropt;
+	StrDeq cmdln_deq;
 
-	ciphopts->program_name.append(usr_cmdln.at(opt_number));
-	ciphopts->prog_name_stripped.append(fsys::path(usr_cmdln.at(opt_number)).filename().string());
+	cmdln_deq.assign(usr_cmdln.begin(), usr_cmdln.end());
 
-	++opt_number;
+	string_view curr_arg = cmdln_deq.front();
 
-	// check for program name only and print usage if so
-	if( usr_cmdln.size() == 1 ) {
-		parse_results = 1;
+	ciphopts->program_name.assign(curr_arg.begin(), curr_arg.end());
+	ciphopts->prog_name_stripped.assign(fsys::path(curr_arg).filename().string());
 
-		printUsage(ciphopts->prog_name_stripped);
+	cmdln_deq.pop_front();
+
+	// Check for program name only and print usage if so
+	if( cmdln_deq.empty() ) {
+		parse_results = CMDLN_USAGE_REQ;
 
 		return(parse_results);
 	}
 
-	// evaluate each option and convert if necessary
-	while( opt_number < usr_cmdln.size() ) {
-		curropt = usr_cmdln.at(opt_number);
+	// Evaluate each option and convert if necessary
+	while( not cmdln_deq.empty() ) {
+		curr_arg = cmdln_deq.front();
 
-		if( (curropt.compare("-i") == 0) or
-		    (curropt.compare("--ifile") == 0) ) 
+		if( (curr_arg.compare("-i"sv) == 0) or
+		    (curr_arg.compare("--ifile"sv) == 0) ) 
 		{
-			ciphopts->infilename = usr_cmdln.at(opt_number + 1);
-			opt_number += 2;
+			cmdln_deq.pop_front();
+			ciphopts->infilename = cmdln_deq.front();
+			cmdln_deq.pop_front();
 		}
-		else if( (curropt.compare("-o") == 0) or
-		         (curropt.compare("--ofile") == 0) ) 
+		else if( (curr_arg.compare("-o"sv) == 0) or
+		         (curr_arg.compare("--ofile"sv) == 0) ) 
 		{
-			ciphopts->outfilename = usr_cmdln.at(opt_number + 1);
-			ciphopts->use_default_oname = false;
-			opt_number += 2;
+			cmdln_deq.pop_front();
+			ciphopts->outfilename = cmdln_deq.front();
+			ciphopts->decipher_flags[1] = false;
+			cmdln_deq.pop_front();
 		}
-		else if( (curropt.compare("-s") == 0) or
-		         (curropt.compare("--shift-amount") == 0) ) 
+		else if( (curr_arg.compare("-s"sv) == 0) or
+		         (curr_arg.compare("--shift-amount"sv) == 0) ) 
 		{
-			string currarg = usr_cmdln.at(opt_number + 1);
+			cmdln_deq.pop_front();
+			string tmp_int_str = cmdln_deq.front();
 
 			try {
-				ciphopts->orig_shift_len = std::stoi(currarg, nullptr, 10);
-				opt_number += 2;
+				ciphopts->orig_shift_len = std::stoi(tmp_int_str, nullptr, 10);
+				cmdln_deq.pop_front();
 			}
 			catch(const std::invalid_argument& e) {
 				throw e;
@@ -501,192 +571,148 @@ int parseCommandLine(const StrVec& usr_cmdln, DecipherCtrlOpts* ciphopts)
 				throw e;
 			}
 		}
-		else if( (curropt.compare("--shift-nums") == 0) ) 
+		else if( (curr_arg.compare("--shift-numbers"sv) == 0) ) 
 		{
-			ciphopts->dec_numbers = true;
-			opt_number += 1;
+			ciphopts->decipher_flags[2] = true;
+			cmdln_deq.pop_front();
 		}
-		else if( (curropt.compare("--shift-puncts") == 0) ) 
+		else if( (curr_arg.compare("--shift-puncts"sv) == 0) ) 
 		{
-			ciphopts->dec_puncts = true;
-			opt_number += 1;
+			ciphopts->decipher_flags[3] = true;
+			cmdln_deq.pop_front();
 		}
-		else if( (curropt.compare("--shift-all") == 0) ) 
+		else if( (curr_arg.compare("--shift-all"sv) == 0) ) 
 		{
-			ciphopts->dec_numbers = true;
-			ciphopts->dec_puncts  = true;
-			opt_number += 1;
+			ciphopts->decipher_flags[2] = true;
+			ciphopts->decipher_flags[3] = true;
+			cmdln_deq.pop_front();
 		}
-		else if( (curropt.compare("--help") == 0) ) 
+		else if( (curr_arg.compare("--help"sv) == 0) ) 
 		{
-			parse_results = 1;
-			printHelp(ciphopts->prog_name_stripped);
-			opt_number = usr_cmdln.size();
+			ciphopts->decipher_flags[0] = true;
+			parse_results = CMDLN_HELP_REQ;
+			cmdln_deq.clear();
 		}
-		else if( (curropt.compare("--show-log") == 0) ) 
+		else if( (curr_arg.compare("--show-log"sv) == 0) ) 
 		{
-			ciphopts->display_log_info = true;
-			opt_number += 1;
+			ciphopts->decipher_flags[7] = true;
+			cmdln_deq.pop_front();
 		}
 		else
 		{
-			// check for collection of single-value options combined into
-			//   a string or individually
-			bool valid_sco_used = false;
+			// Parse the single character options
+			parse_results = parseSingleCharOptions(curr_arg, ciphopts);
 
-			//string curropt = usr_cmdln.at(opt_number);
-			std::set<char> valid_singlechr_opts = {'a', 'l', 'n', 'p', 'h'};
-
-			// if the overall argument is not valid, use this error message
+			// If the overall argument is not valid, use this error message
 			string ia_errmsg = std::format(
 				"\nInvalid argument ({}) used. Please see HELP with -h or --help option.\n", 
-				curropt);
+				curr_arg);
 
-			if( curropt.find_last_of('-') > 0 ) {
-				throw std::invalid_argument(ia_errmsg);
+			switch( parse_results ) {
+				case CMDLN_USER_ERROR:
+					cmdln_deq.clear();
+					throw std::invalid_argument(ia_errmsg);
+					break;
+				case CMDLN_HELP_REQ:
+				case CMDLN_USAGE_REQ:
+					cmdln_deq.clear();
+					break;
+				default:
+					cmdln_deq.pop_front();
+					break;
 			}
-
-			valid_sco_used = true;
-			for(size_t n = 1; n < curropt.size(); ++n) {
-				if(valid_singlechr_opts.contains(curropt[n])) {
-					switch(curropt[n]) 
-					{
-						case 'a':
-							ciphopts->dec_numbers = true;
-							ciphopts->dec_puncts  = true;
-							break;
-						case 'n':
-							ciphopts->dec_numbers = true;
-							break;
-						case 'p':
-							ciphopts->dec_puncts = true;
-							break;
-						case 'l':
-							ciphopts->display_log_info = true;
-							break;
-						case 'h':
-							printHelp(ciphopts->prog_name_stripped);
-							parse_results = 1;
-							opt_number = usr_cmdln.size();
-							break;
-					}// end switch()
-				}
-				else {
-					valid_sco_used = false;
-					ciphopts->display_log_info = false;
-					ciphopts->dec_numbers = false;
-					ciphopts->dec_puncts = false;
-
-					ciphopts->decipher_flags[7] = false;
-					ciphopts->decipher_flags[2] = false;
-					ciphopts->decipher_flags[3] = false;
-
-					string sco_errmsg = std::format(
-						"\nInvalid single-character option ({:c}) within ({:s}). See HELP with -h or --help option.\n",
-						curropt[n],
-						curropt
-					);
-					opt_number = usr_cmdln.size();
-					throw std::invalid_argument(sco_errmsg);
-				}
-			}// end for(n)
-
-			if( valid_sco_used ) {
-				opt_number += 1;
-			}
-			else {
-				opt_number = usr_cmdln.size();
-				throw std::invalid_argument(ia_errmsg);
-			}
-		}
+		}// end if-elseif-else
 		
-		curropt.clear();
-		curropt.shrink_to_fit();
-	}
+	}// end while()
 
 	return(parse_results);
 }
 
+
 /*
+ * generateCipherDict
+ *
  * Description:
  * Generate the necessary alphabet, punctuation and number mappings to put
  *  into a single map/dictionary for deciphering text.
  *
  * Input:
- * ciphopts -> object containing cipher options/controls
+ * ciphopts -> object containing cipher options/controls [pointer]
  *
  * Output:
- * None
+ * None (Disallowed)
  */
 void generateCipherDict(DecipherCtrlOpts* ciphopts) noexcept
 {
-	// shift amount for regular uppercase & lowercase alphabet
+	// Shift amount for regular uppercase & lowercase alphabet
 	ciphopts->reduced_shift_len = calcReducedShift(ciphopts->orig_shift_len);
 
-	// shift amounts for numbers, punctuation, both or neither
-	if( ciphopts->dec_numbers ) {
+	// Shift amounts for numberical digits, punctuation symbols, both or neither.
+	if( ciphopts->decipher_flags[2] == true ) {
 		ciphopts->digits_shift_len = calcReducedShift(
 			ciphopts->orig_shift_len, static_cast<int>(ORIG_DIGITS.size()));
 	}
 
-	if( ciphopts->dec_puncts ) {
+	if( ciphopts->decipher_flags[3] == true ) {
 		ciphopts->puncts_shift_len = calcReducedShift(
 			ciphopts->orig_shift_len, static_cast<int>(ORIG_PUNCTUATION_SYMBOLS.size()));
 	}
 
-	// copies of the character arrays to be circularly shifted
-	//   shift arrays as needed and create the final dictionary
+	// Copies of the character arrays to be circularly shifted.
+	//   Shift arrays as needed and create the final dictionary.
 	ChrVarr shifted_uppercase = ORIG_UPPERCASE.cshift(ciphopts->reduced_shift_len);
 	ChrVarr shifted_lowercase = ORIG_LOWERCASE.cshift(ciphopts->reduced_shift_len);
 	ChrVarr shifted_digits    = ORIG_DIGITS.cshift(ciphopts->digits_shift_len);
 	ChrVarr shifted_puncts    = ORIG_PUNCTUATION_SYMBOLS.cshift(ciphopts->puncts_shift_len);
 	
 	for(size_t n = 0; n < shifted_uppercase.size(); ++n) {
-		//ciphopts->cipher_dict[ORIG_UPPERCASE[n]] = shifted_uppercase[n];
 		ciphopts->cipher_dict[shifted_uppercase[n]] = ORIG_UPPERCASE[n];
 	}
 
 	for(size_t n = 0; n < shifted_lowercase.size(); ++n) {
-		//ciphopts->cipher_dict[ORIG_LOWERCASE[n]] = shifted_lowercase[n];
 		ciphopts->cipher_dict[shifted_lowercase[n]] = ORIG_LOWERCASE[n];
 	}
 
 	for(size_t n = 0; n < shifted_digits.size(); ++n) {
-		//ciphopts->cipher_dict[ORIG_DIGITS[n]] = shifted_digits[n];
 		ciphopts->cipher_dict[shifted_digits[n]] = ORIG_DIGITS[n];
 	}
 
 	for(size_t n = 0; n < shifted_puncts.size(); ++n) {
-		//ciphopts->cipher_dict[ORIG_PUNCTUATION_SYMBOLS[n]] = shifted_puncts[n];
 		ciphopts->cipher_dict[shifted_puncts[n]] = ORIG_PUNCTUATION_SYMBOLS[n];
 	}
 
 	return;
 }
 
+
 /*
+ * decipherFileText
+ *
  * Description:
  * Checks for the existence of the input filename, throws exception if it does not 
  *   exist. If it does exist, reads text (line-by-line) and deciphers the text.
  *   If the output file exists, it is overwritten without asking.
  *
  * Input:
- * ciphopts -> object storing program controls/options
+ * ciphopts -> object storing program controls/options [pointer]
  *
  * Output:
  * None (throws exception for FILE NOT FOUND)
  */
 void decipherFileText(DecipherCtrlOpts* ciphopts)
 {
+	// Error message just in case there are filestream problems
+	string errmsg{"Deciphering text file problem."};
+	std::error_code ec;
+	
 	// Form the file pathnames and check for existence
 	// Input text file
 	fsys::path ifilepath( ciphopts->infilename );
 	std::ifstream ifile;
 
 	if( not fsys::exists(ifilepath) ) {
-		string errmsg{"Input file not found."};
-		std::error_code ec;
-		throw fsys::filesystem_error(errmsg,ifilepath,ec);
+		ec = std::make_error_code(std::errc::no_such_file_or_directory);
+		throw fsys::filesystem_error(errmsg, ifilepath, ec);
 		return;
 	}
 	else {
@@ -694,19 +720,23 @@ void decipherFileText(DecipherCtrlOpts* ciphopts)
 	}
 
 	// Output text file
-	string fulloname;
-	if( ciphopts->use_default_oname ) {
-		fulloname = ciphopts->infilename;
-		fulloname = fulloname.append(".dec");
-		ciphopts->outfilename = fulloname;
-	}
-	else {
-		fulloname = ciphopts->outfilename;
+	if( ciphopts->decipher_flags[1] == true ) {
+		string oname_full(ciphopts->infilename);
+		oname_full = oname_full.append(".dec");
+		ciphopts->outfilename = oname_full;
 	}
 
-	fsys::path ofilepath( fulloname );
+	fsys::path ofilepath( ciphopts->outfilename );
 
 	std::ofstream ofile(ofilepath);
+
+	if( not ofile.is_open() ) {
+		if( ifile.is_open() ) { ifile.close(); }
+
+		ec = std::make_error_code(std::errc::no_message);
+		throw fsys::filesystem_error(errmsg, ofilepath, ec);
+		return;
+	}
 
 	// Read input stream and write deciphered output stream
 	
@@ -727,13 +757,14 @@ void decipherFileText(DecipherCtrlOpts* ciphopts)
 
 		origstr.clear();
 		outstr.clear();
-	}
+	}// end while()
 
+	// Close file (clean-up)
 	if( ifile.is_open() ) { ifile.close(); }
 	if( ofile.is_open() ) { ofile.close(); }
 
 	// Print to screen the number of characters read
-	if( not ciphopts->display_log_info ) {
+	if( not ciphopts->decipher_flags[7] ) {
 		cout << endl;
 		cout << std::format("Read {:d} characters from the input file.", num_chrs_read) << endl;
 		cout << endl;
@@ -744,13 +775,15 @@ void decipherFileText(DecipherCtrlOpts* ciphopts)
 
 
 /*
+ * printLogInfo
+ *
  * Description:
  * Prints log-like information to terminal screen.
  *   Information such as name of program, input/output filenames, control 
  *   options, etc.
  *
  * Input:
- * ciphopts -> object containing program control options/values
+ * ciphopts -> object containing program control options/values [pointer]
  *
  * Output:
  * None
@@ -770,12 +803,12 @@ void printLogInfo(DecipherCtrlOpts* ciphopts) noexcept
 	cerr << "[Stripped] Name:     " << ciphopts->prog_name_stripped << endl;
 	cerr << "IFILE:               " << ciphopts->infilename << endl;
 	cerr << "OFILE:               " << ciphopts->outfilename << endl;
-	cerr << "Default output name: " << std::boolalpha << ciphopts->use_default_oname << endl;
+	cerr << "Default output name: " << std::boolalpha << ciphopts->decipher_flags[1] << endl;
 	cerr << "Shift amount:        " << ciphopts->orig_shift_len << endl;
 	cerr << "[Reduced] Shift:     " << ciphopts->reduced_shift_len << endl;
-	cerr << "Shift numbers:       " << std::boolalpha << ciphopts->dec_numbers << endl;
+	cerr << "Shift numbers:       " << std::boolalpha << ciphopts->decipher_flags[2] << endl;
 	cerr << "Number shift amount: " << ciphopts->digits_shift_len << endl;
-	cerr << "Shift punctuation:   " << std::boolalpha << ciphopts->dec_puncts << endl;
+	cerr << "Shift punctuation:   " << std::boolalpha << ciphopts->decipher_flags[3] << endl;
 	cerr << "Punct. shift amount: " << ciphopts->puncts_shift_len << endl;
 
 	cerr << "Decipher dictionary: {";
